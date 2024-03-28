@@ -15,6 +15,14 @@ module.exports = async ({ github, owner, repo, issue_number, securityScanResult,
         `${scanResult}`
     ]
 
+    // define the comment body
+    let commentBody = [
+        `# Scan Results`,
+        `## Security`,
+        ``
+    ]
+
+    // add the security results to the comment body
     commentBody.push.apply(commentBody, securityBody)
 
     // create comment letting the user know the results
