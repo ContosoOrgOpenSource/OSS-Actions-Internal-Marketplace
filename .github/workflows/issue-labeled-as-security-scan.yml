@@ -280,67 +280,8 @@ jobs:
         name: security-scan-result
         path: result.md
        
-
-  codeql:
-    runs-on: ubuntu-latest
-    needs: 
-      - fork-action-test
-      - find-action-name
-      - get-languages-from-action
-    outputs:
-      codeql: ${{ steps.get-codeql-results.outputs.codeql }}
-      codeql_run_id: ${{ steps.CodeQL-inject.outputs.codeql_run_id }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/github-script@v7.0.1
-        name: Inject CodeQL workflow into new forked repository
-        id: CodeQL-inject
-        with:      
-          github-token: ${{ secrets.PAT_MARKETPLACE }}  
-          script: |
-             const script = require('./src/inject-codeql.js') 
-             const owner = "${{ env.fork-owner }}"
-             const repo = "${{ needs.find-action-name.outputs.actionName }}"
-
-             console.log(`Using this repository: [${owner}/${repo}]`)
-             const languages = `${{ needs.get-languages-from-action.outputs.languages }}`
-             const lang = JSON.parse(languages)
-             const { ref, targetPath } = await script({github, owner, repo, languages: lang})
-      
-             console.log(`Waiting for CodeQL workflow to complete`)
-             
-             const startAndWaitScript = require('./src/start-and-wait-codeql.js')
-                
-             console.log(`Using this repository: [${owner}/${repo}] with path [${targetPath}] and ref [${ref}]`)
-             const { scanResult, run_id } = await startAndWaitScript({github, owner, repo, path: targetPath, ref})
-             if (scanResult === 0) {
-               console.log(`CodeQL workflow with run_id [${run_id}] completed successfully`)
-             } 
-             else {
-               console.log(`CodeQL workflow with run_id [${run_id}] failed with exit code ${scanResult}`)
-             }           
-             
-             console.log(`::set-output name=codeql_run_id::'${run_id}'`)
-
-      - uses: actions/github-script@v7.0.1
-        name: Get resuls from CodeQL scan
-        id: get-codeql-results
-        with:
-          github-token: ${{ secrets.PAT_MARKETPLACE }}
-          script: |
-             const script = require('./src/get-codeql-results.js')
-                    
-             const owner = "${{ env.fork-owner }}"
-             const repo = "${{ needs.find-action-name.outputs.actionName }}"
-
-             const result = await script({github, owner, repo})
-             console.log(`CodeQL scan completed with result: ${JSON.stringify(result)}`)
-             const output = JSON.stringify(result)
-             console.log(`::set-output name=codeql::'${output}'`)
-
   display-results:
     needs: 
-      - codeql
       - find-action-name
       - check-action-security-setup
     runs-on: ubuntu-latest
@@ -359,27 +300,12 @@ jobs:
           github-token: ${{ secrets.PAT_MARKETPLACE }}
           script: |            
             const fs = require('fs');
-            const codeql = `${{ needs.codeql.outputs.codeql }}`
-            console.log(`CodeQL scan substring: [${codeql.substring(1, codeql.length - 1)}]`)  
-
-            const codeqlResult = JSON.parse(codeql.substring(1, codeql.length - 1))
-            if (process.env.DEBUG) {
-              console.log(`CodeQL scan results:`)
-              console.log(`- url: ${codeqlResult.url}`)
-              console.log(`- results.count: [${codeqlResult.results_count}]`)
-              console.log(`- environment: [${codeqlResult.environment}]`)
-              console.log(`- created_at: [${codeqlResult.created_at}]`)
-            }
 
             const owner = "${{ needs.find-action-name.outputs.request_owner }}"
             const repo = "${{ needs.find-action-name.outputs.request_repo }}"
             const issue = "${{ needs.find-action-name.outputs.request_issue }}"
-            const codeql_run_id = ${{ needs.codeql.outputs.codeql_run_id }}
-
-            const forkedRepoOwner = "${{ env.fork-owner }}"
-            const forkedRepoName= "${{ needs.find-action-name.outputs.actionName }}"
-            const codeql_run_link = `https://github.com/${forkedRepoOwner}/${forkedRepoName}/actions/runs/${codeql_run_id}`
+            
 
             const script = require('./src/combine-results.js')
-            const securityFile = `/home/runner/work/github-actions-requests/github-actions-requests/security-scan-result/result.md`
-            await script({github, owner, repo, issue_number: issue, codeql_run_link, codeqlResult, securityScanResult: securityFile, fs})
+            const securityFile = `./security-scan-result/result.md`
+            await script({github, owner, repo, issue_number: issue, securityScanResult: securityFile, fs})

@@ -3,13 +3,13 @@
     async function addCodeQLworkflow(github, owner, repo, languageString) {
         
         const { readFileSync } = require('fs')
-        const path = 'codeql-analysis.yml'
-        let content = readFileSync(`${process.env.GITHUB_WORKSPACE}/${path}`, 'utf8')
+        const path = 'codeql.yml'
+        let content = readFileSync(`${process.env.GITHUB_WORKSPACE}/${path}`, 'utf8') 
         // replace the default language string with the new one
         const language = "language: [ 'cpp', 'csharp', 'go', 'java', 'javascript', 'python' ]"
         content = content.toString('utf8').replace(language, languageString)
         
-        const targetPath = ".github/workflows/codeql-analysis.yml"                                    
+        const targetPath = ".github/workflows/codeql.yml"                                    
         console.log(`Uploading the CodeQL workflow to the forked repository`)
         github.rest.repos.createOrUpdateFileContents({
             owner,
