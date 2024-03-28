@@ -1,0 +1,385 @@
+name: Issue labeled security scan
+
+on:
+  issues: 
+    types: [labeled, unlabeled]
+
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: 'Issue number to work with'
+        required: true
+        default: '11'
+    
+env: 
+  fork-owner: ContosoOrgOpenSource # where to place the forks
+    
+jobs:
+  
+  find-action-name:
+    runs-on: ubuntu-latest
+    if: github.event.label.name == 'security-check' || github.event_name == 'workflow_dispatch'
+
+    outputs:
+      actionOwnerNameVersion: ${{ steps.get-action.outputs.actionOwnerNameVersion }} # this is the action to check for security issues in the code. An example output is 'actions/checkout@v4'
+      actionOwner: ${{ steps.get-action.outputs.actionOwner }}  # this is the owner of the repo to fork
+      actionName: ${{ steps.get-action.outputs.actionName }} # this is the repo to fork. An example output is 'actions/checkout@v4'
+      request_owner: ${{ steps.get-action.outputs.request_owner }} # this is the owner of the repo where the issue was created
+      request_repo: ${{ steps.get-action.outputs.request_repo }} # this is the repo where the issue was created
+      request_issue: ${{ steps.get-action.outputs.request_issue }} # this is the issue number where the action was requested
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Find action from dispatch
+      id: dispatch_issue_find
+      run: |
+         echo "Testing for dispatch event with issue number: ${{ github.event.inputs.issue }}"
+         issue_number=${{ github.event.inputs.issue }}
+         if [ "${{ github.event.inputs.issue }}" == "" ]; then
+           echo "issue number not found in workflow dispatch event"
+           echo 'Found the issue that triggered this event with number [${{ github.event.issue.number }}]'
+           echo 'Found the issue title [${{ github.event.issue.title }}]'
+         else
+           echo "issue number found: [$issue_number]"
+           echo "::set-output name=issue_number::${issue_number}"
+         fi
+
+    - uses: actions/github-script@v7.0.1
+      id: get-action
+      with:
+        result-encoding: string
+        script: |
+          // We will call the script to find the action from the issue body. We will pass the current repo owner and repo name to the script and it will return the target action repo/owner from the issue body
+          const script = require('./src/find-action-from-issue.js') 
+
+          // here context is the context of the workflow which contains the owner of the repo where the workflow is running
+          const owner = context.repo.owner 
+
+          // this is the repo where the workflow is running
+          const repo = context.repo.repo
+          
+          let issue_number = context.issue.number         
+          
+          if (issue_number == null) {
+            console.log(`issue number not found in context, searching for it in workflow dispatch step`)
+            console.log(`issue number: [${{ steps.dispatch_issue_find.outputs.issue_number }}]`)
+            issue_number = `${{ steps.dispatch_issue_find.outputs.issue_number }}`
+          }
+
+          // here the script is being called with the owner, repo and issue number. It will return the target action repo/owner.
+
+          let { result, action } = await script({github, owner, repo, issue_number}) 
+
+          let commentBody
+          if (result === 0) {
+            commentBody = [
+              `:robot: Found action from the request in the issue body ✅`,
+              `\`${action}\``,
+              `This action will now be checked automatically and the results will be posted back in this issue.`
+            ]
+          }
+          else {
+            commentBody = [
+              `:robot: Could not find action from the request in the issue body :high_voltage:`,
+              ``,
+              `Please make sure you have this on a line in the body:`,
+              `uses: organization/repo`
+            ]
+          }
+
+          await github.rest.issues.createComment({
+            owner,
+            repo,
+            issue_number,
+            body: commentBody.join('\n')
+          });
+
+          return result
+
+  get-languages-from-action:
+    needs: find-action-name
+    name: Load action code languages
+    runs-on: ubuntu-latest
+    outputs:
+      languages: ${{ steps.analysis.outputs.languages }}
+
+    steps:
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 3.0
+          bundler-cache: true
+    
+      - name: Clone actions repo # this is the repo where the action is located
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.fork-owner }}/${{ needs.find-action-name.outputs.actionName }}
+          token: ${{ secrets.PAT_MARKETPLACE }}
+          path: ${{ needs.find-action-name.outputs.actionName }}
+    
+      - name: Install linguist gem
+        run: gem install github-linguist
+        
+      - name: Get linguist analysis
+        id: analysis
+        run: | 
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+          if [ -d "${{ needs.find-action-name.outputs.actionName }}" ]; then
+              cd "${{ needs.find-action-name.outputs.actionName }}"
+              linguist=$(github-linguist --json)
+              echo "Linguist results:"
+              echo "$linguist"
+              echo "::set-output name=languages::$linguist"
+          else
+              echo "Error: Repository path not found or invalid"
+              echo "Current directory: $(pwd)"
+              echo "Contents: $(ls -la)"
+              exit 1
+          fi
+
+  fork-action-test:    
+    runs-on: ubuntu-latest
+    name: Fork action to test organization
+    needs: find-action-name
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/github-script@v7.0.1
+      name: Check input variables have values     
+      with: 
+        github-token: ${{ secrets.PAT_MARKETPLACE }}
+        script: |
+          // This is the repo to fork
+          const repo = "${{ needs.find-action-name.outputs.actionName }}"
+
+          // This is the owner of the repo to fork
+          const owner = "${{ needs.find-action-name.outputs.actionOwner }}"
+
+          // This is the organization where the fork will be placed
+          const org = "${{ env.fork-owner }}"
+
+          if (repo === null || repo === '') {
+            console.log(`repo not found in the outputs of the find-action-name step`)
+            console.log(`repo: [${{ needs.find-action-name.outputs.actionName }}]`)
+            return 1
+          }
+
+          if (owner === null || owner === '') {
+            console.log(`owner not found in the outputs of the find-action-name step`)
+            console.log(`owner: [${{ needs.find-action-name.outputs.actionOwner }}]`)
+            return 1
+          }
+
+          if (org === null || org === '') {
+            console.log(`org not found in the outputs of the find-action-name step`)
+            console.log(`org: [${{ needs.find-action-name.outputs.actionOwner }}]`)
+            return 1
+          }
+
+          return 0
+
+    - name: Fork the action repository to env.fork-owner organization
+      uses: actions/github-script@v7.0.1
+      with:
+        github-token: ${{ secrets.PAT_MARKETPLACE }}
+        script: |
+    
+          // This is the repo to fork
+          const actionName = "${{ needs.find-action-name.outputs.actionName }}"
+
+          // This is the owner of the repo to fork
+          const actionOwner = "${{ needs.find-action-name.outputs.actionOwner }}"
+
+          // This is the organization where the fork will be placed
+          const org = "${{ env.fork-owner }}"
+          
+        
+          const result = await github.request('POST /repos/{owner}/{repo}/forks', {
+              owner: actionOwner,
+              repo: actionName,
+              organization: org,
+              name: actionName,
+              default_branch_only: true,
+              headers: {
+                'X-GitHub-Api-Version': '2022-11-28'
+              }
+            })
+          
+          console.log(result.data)
+
+  enable-dependabot:
+    runs-on: ubuntu-latest
+    needs:
+      - fork-action-test
+      - find-action-name
+    steps:
+      - uses: actions/github-script@v7.0.1
+        with: 
+          github-token: ${{ secrets.PAT_MARKETPLACE }}
+          script: |
+            const owner = "${{ env.fork-owner }}"
+            const actionName = "${{ needs.find-action-name.outputs.actionName }}"
+
+            await github.request('PUT /repos/{owner}/{actionName}/vulnerability-alerts', {
+              owner,
+              actionName
+            })
+
+            console.log(`Enabled dependabot on the forked actionName ${owner}/${actionName}. We don't know when those checks are completed. Use another label to trigger the 'dependabot-alerts' workflow`)
+  
+  # add a multi-line comment to the check-action-security-setup job
+  
+  check-action-security-setup:
+    runs-on: ubuntu-latest
+    needs: find-action-name
+    steps:
+    - name: Check-out actions-request repo
+      uses: actions/checkout@v4
+
+    - name: Check-out referenced Action
+      run: |
+        git clone https://github.com/${{ needs.find-action-name.outputs.actionOwner }}/${{ needs.find-action-name.outputs.actionName }} action
+
+    - name: Check for .github and workflows folder and run docker scan
+      id: scan
+      run: | 
+        chmod +x src/security-scan.sh
+        src/security-scan.sh
+      env:
+        ACTION: ${{ needs.find-action-name.outputs.actionOwnerNameVersion }}
+
+    - name: Upload Trivy report
+      uses: actions/upload-artifact@v1
+      if: steps.scan.outputs.action_uses_docker == 'true'
+      with:
+        path: issues
+        name: trivy-issues.txt
+        mime-type: application/text
+        
+    - name: Update comment with results
+      run: |
+        chmod +x src/update-issue-comment.sh
+        src/update-issue-comment.sh
+      env:
+        HAS_GITHUB_FOLDER: ${{ steps.scan.outputs.has_github_folder }}
+        HAS_WORKFLOWS_FOLDER: ${{ steps.scan.outputs.has_workflows_folder }}
+        HAS_DEPENDABOT_CONFIGURATION: ${{ steps.scan.outputs.has_dependabot_configuration }}
+        HAS_CODEQL_INIT: ${{ steps.scan.outputs.has_codeql_init }}
+        WORKFLOW_WITH_CODEQL_INIT: ${{ steps.scan.outputs.workflow_with_codeql_init }}
+        HAS_CODEQL_ANALYZE: ${{ steps.scan.outputs.has_codeql_analyze }}
+        WORKFLOW_WITH_CODEQL_ANALYZE: ${{ steps.scan.outputs.workflow_with_codeql_analyze }}
+        ACTION_USES_DOCKER: ${{ steps.scan.outputs.action_uses_docker }}
+        HAS_LOW_MEDIUM_ISSUES: ${{ steps.scan.outputs.has_low_medium_issues }}
+        LOW_MEDIUM_ISSUES: ${{ steps.scan.outputs.low_medium_issues }}
+        HAS_HIGH_CRITICAL_ISSUES: ${{ steps.scan.outputs.has_high_critical_issues }}
+        HIGH_CRITICAL_ISSUES: ${{ steps.scan.outputs.high_critical_issues }}
+
+    - name: Upload result file as artefact
+      uses: actions/upload-artifact@v1
+      with:
+        name: security-scan-result
+        path: result.md
+       
+
+  codeql:
+    runs-on: ubuntu-latest
+    needs: 
+      - fork-action-test
+      - find-action-name
+      - get-languages-from-action
+    outputs:
+      codeql: ${{ steps.get-codeql-results.outputs.codeql }}
+      codeql_run_id: ${{ steps.CodeQL-inject.outputs.codeql_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/github-script@v7.0.1
+        name: Inject CodeQL workflow into new forked repository
+        id: CodeQL-inject
+        with:      
+          github-token: ${{ secrets.PAT_MARKETPLACE }}  
+          script: |
+             const script = require('./src/inject-codeql.js') 
+             const owner = "${{ env.fork-owner }}"
+             const repo = "${{ needs.find-action-name.outputs.actionName }}"
+
+             console.log(`Using this repository: [${owner}/${repo}]`)
+             const languages = `${{ needs.get-languages-from-action.outputs.languages }}`
+             const lang = JSON.parse(languages)
+             const { ref, targetPath } = await script({github, owner, repo, languages: lang})
+      
+             console.log(`Waiting for CodeQL workflow to complete`)
+             
+             const startAndWaitScript = require('./src/start-and-wait-codeql.js')
+                
+             console.log(`Using this repository: [${owner}/${repo}] with path [${targetPath}] and ref [${ref}]`)
+             const { scanResult, run_id } = await startAndWaitScript({github, owner, repo, path: targetPath, ref})
+             if (scanResult === 0) {
+               console.log(`CodeQL workflow with run_id [${run_id}] completed successfully`)
+             } 
+             else {
+               console.log(`CodeQL workflow with run_id [${run_id}] failed with exit code ${scanResult}`)
+             }           
+             
+             console.log(`::set-output name=codeql_run_id::'${run_id}'`)
+
+      - uses: actions/github-script@v7.0.1
+        name: Get resuls from CodeQL scan
+        id: get-codeql-results
+        with:
+          github-token: ${{ secrets.PAT_MARKETPLACE }}
+          script: |
+             const script = require('./src/get-codeql-results.js')
+                    
+             const owner = "${{ env.fork-owner }}"
+             const repo = "${{ needs.find-action-name.outputs.actionName }}"
+
+             const result = await script({github, owner, repo})
+             console.log(`CodeQL scan completed with result: ${JSON.stringify(result)}`)
+             const output = JSON.stringify(result)
+             console.log(`::set-output name=codeql::'${output}'`)
+
+  display-results:
+    needs: 
+      - codeql
+      - find-action-name
+      - check-action-security-setup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4      
+      - uses: actions/download-artifact@v1
+        with:
+          name: security-scan-result
+          path: security-scan-result
+     
+      - name: Display results
+        uses: actions/github-script@v7.0.1
+        env:
+          DEBUG: false
+        with:
+          github-token: ${{ secrets.PAT_MARKETPLACE }}
+          script: |            
+            const fs = require('fs');
+            const codeql = `${{ needs.codeql.outputs.codeql }}`
+            console.log(`CodeQL scan substring: [${codeql.substring(1, codeql.length - 1)}]`)  
+
+            const codeqlResult = JSON.parse(codeql.substring(1, codeql.length - 1))
+            if (process.env.DEBUG) {
+              console.log(`CodeQL scan results:`)
+              console.log(`- url: ${codeqlResult.url}`)
+              console.log(`- results.count: [${codeqlResult.results_count}]`)
+              console.log(`- environment: [${codeqlResult.environment}]`)
+              console.log(`- created_at: [${codeqlResult.created_at}]`)
+            }
+
+            const owner = "${{ needs.find-action-name.outputs.request_owner }}"
+            const repo = "${{ needs.find-action-name.outputs.request_repo }}"
+            const issue = "${{ needs.find-action-name.outputs.request_issue }}"
+            const codeql_run_id = ${{ needs.codeql.outputs.codeql_run_id }}
+
+            const forkedRepoOwner = "${{ env.fork-owner }}"
+            const forkedRepoName= "${{ needs.find-action-name.outputs.actionName }}"
+            const codeql_run_link = `https://github.com/${forkedRepoOwner}/${forkedRepoName}/actions/runs/${codeql_run_id}`
+
+            const script = require('./src/combine-results.js')
+            const securityFile = `/home/runner/work/github-actions-requests/github-actions-requests/security-scan-result/result.md`
+            await script({github, owner, repo, issue_number: issue, codeql_run_link, codeqlResult, securityScanResult: securityFile, fs})

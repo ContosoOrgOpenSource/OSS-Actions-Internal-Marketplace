@@ -1,0 +1,18 @@
+name: Notify on new issue
+
+on:
+  issues:
+    types: [opened]
+    
+jobs:
+  tag-a-user:
+    runs-on: ubuntu-latest
+    steps: 
+      - uses: devops-actions/issue-comment-tag@v0.1.8
+        name: Tag_a_user_or_team_in_an_issue_comment
+        with: 
+          issue: ${{ github.event.issue.number }}
+          team: kcodeg123
+          owner: ${{ github.repository_owner }}
+          repo: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.PAT_MARKETPLACE }}
