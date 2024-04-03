@@ -4,9 +4,9 @@ Pre-requisites:
 1. A GitHub Organization
 2. A GitHub Repository
 
-## Request for using a public GitHub Action
+## Process to request for using a public GitHub Action
 
-![image](https://github.com/ContosoOrgOpenSource/OSS-Actions-Internal-Marketplace/assets/3813135/3fdd8094-9553-4803-b629-8fc72b0a5ccc)
+![image](https://github.com/ContosoOrgOpenSource/OSS-Actions-Internal-Marketplace/assets/3813135/ba93c451-2ab8-4547-8f24-71d9dfc6baf1)
 
 ### Step 1. Opt in to fine-grained personal access tokens from the Organization
 
