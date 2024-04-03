@@ -6,8 +6,7 @@ Pre-requisites:
 
 ## Request for using a public GitHub Action
 
-![image](https://github.com/ContosoOrgOpenSource/OSS-Actions-Internal-Marketplace/assets/3813135/fc91dfd6-6112-495b-8897-77c124b9ac4b)
-
+![image](https://github.com/ContosoOrgOpenSource/OSS-Actions-Internal-Marketplace/assets/3813135/3fdd8094-9553-4803-b629-8fc72b0a5ccc)
 
 ### Step 1. Opt in to fine-grained personal access tokens from the Organization
 
