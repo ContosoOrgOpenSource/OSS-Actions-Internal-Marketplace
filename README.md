@@ -6,6 +6,9 @@ Pre-requisites:
 
 ## Request for using a public GitHub Action
 
+![image](https://github.com/ContosoOrgOpenSource/OSS-Actions-Internal-Marketplace/assets/3813135/fc91dfd6-6112-495b-8897-77c124b9ac4b)
+
+
 ### Step 1. Opt in to fine-grained personal access tokens from the Organization
 
 [Set a personal access token policy for your organization](https://docs.github.com/en/enterprise-cloud@latest/organizations/managing-programmatic-access-to-your-organization/setting-a-personal-access-token-policy-for-your-organization)
@@ -136,3 +139,10 @@ The steps to create a new issue are as follows:
 The issue will be created with the structured format defined in the template, making it easier for the request to be reviewed and processed.
 
 ### Step 8. Review and process the request
+
+If the action indeed doesn't exist in the Internal Organization and a quick look at the action seems OK, then put the label **security-check** to the issue. This will trigger automated GitHub Workflows to:
+* Fork
+* Run Security scans
+* Post updates to the issue
+
+If the security scans return no vulnerabilities or you are able to fix them, then allow developers to use them via GitHub Actions Policies either by allowing the public action version or the internal forked version.
